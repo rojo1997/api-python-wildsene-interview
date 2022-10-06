@@ -1,0 +1,103 @@
+name: CICD - Workflow
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+env:
+  PROJECT_FOLDER: app
+  DOCKER_IMAGE_NAME: api-wildsense-interview
+  DOCKER_IMAGE_TAG: ${{ github.sha }}
+  KUBERNETES_NAMESPACE: api
+  KUBERNETES_DEPLOYMENT: wildsense-interview
+  PYTHON_VERSION: 3.9
+  POETRY_VERSION: 1.2.1
+  PYLINT_THRESHOLD: 0
+jobs:
+  install-test-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: main
+      - name: Setup python versions
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Poetry
+        uses: abatilo/actions-poetry@v2.1.6
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Install Python dependencies
+        working-directory: ./main
+        run: poetry install
+      - name: Code quality
+        working-directory: ./main
+        run: poetry run pylint --fail-under=${{ env.PYLINT_THRESHOLD }} **/*.py
+      - name: Test & Generate Coverage Report
+        working-directory: ./main
+        run: |
+          poetry run coverage run --source ${{ env.PROJECT_FOLDER }}/ -m pytest
+          poetry run coverage xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          files: ./main/coverage.xml
+          verbose: true
+  build-and-push-docker-image:
+    runs-on: ubuntu-latest
+    needs: [install-test-coverage]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: main
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
+      - name: Build and Push to Docker Registry
+        uses: docker/build-push-action@v2
+        with:
+          context: ./main/
+          file: ./main/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          push: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest, ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            PIPSERVER_URL=${{secrets.PIPSERVER_URL}}
+            PIPSERVER_USERNAME=${{secrets.PIPSERVER_USERNAME}}
+            PIPSERVER_PASSWORD=${{secrets.PIPSERVER_PASSWORD}}
+            POETRY_VERSION=${{env.POETRY_VERSION}}
+  deploy-in-do-kubernetes:
+    runs-on: ubuntu-latest
+    needs: [build-and-push-docker-image]
+    if: "${{contains(github.event.head_commit.message, 'cd run') && contains(github.event.head_commit.message, 'DO')}}"
+    steps:
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      - name: Save DigitalOcean kubeconfig with short-lived credentials
+        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ secrets.DIGITALOCEAN_CLUSTER_ID }}
+      - name: Deploy to DigitalOcean Kubernetes
+        run: kubectl set image deployment/${{ env.KUBERNETES_DEPLOYMENT }} ${{ env.KUBERNETES_DEPLOYMENT }}=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:${{ env.DOCKER_IMAGE_TAG }} -n ${{ env.KUBERNETES_NAMESPACE }}
+      - name: Verify deployment
+        run: kubectl rollout status deployment/${{ env.KUBERNETES_DEPLOYMENT }} -n ${{ env.KUBERNETES_NAMESPACE }}

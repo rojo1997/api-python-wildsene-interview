@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  api-wildsense-interview:
+    image: api-wildsense-interview
+    build:
+      context: .
+      args:
+        POETRY_VERSION: ${POETRY_VERSION}
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      FASTAPI_WORKERS: ${FASTAPI_WORKERS}
+      FASTAPI_PORT: ${FASTAPI_PORT}
+      FASTAPI_LOG_LEVEL: ${FASTAPI_LOG_LEVEL}

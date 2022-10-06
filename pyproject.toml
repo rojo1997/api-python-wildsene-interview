@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "api-wildsense-interview"
+version = "0.1.0"
+description = "Wildsense interview test"
+authors = ["Ernesto Martinez del Pino <ernestomar1997@hotmail.com>"]
+readme = "README.md"
+packages = [
+    { include = "app" }
+]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.11"
+fastapi = "0.85.*"
+uvicorn = "0.18.*"
+python-decouple = "3.6"
+tensorflow = "2.10.*"
+keras = "2.10.*"
+python-multipart = "0.0.*"
+
+[tool.poetry.dev-dependencies]
+coverage = {extras = ["toml"], version = "6.5.*"}
+black = {version = "22.8.*", allow-prereleases = true}
+pytest = "7.1.*"
+pytest-html = "3.1.*"
+pytest-cov = ">=2.10.1,<3.0.0"
+pylint = "2.15.*"
+Pillow = "9.2.*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
